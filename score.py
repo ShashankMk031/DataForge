@@ -11,10 +11,12 @@ Usage:
 
 import json
 import argparse
+import os
+from pathlib import Path
 from typing import Optional
 from collections import Counter
 
-from local_llm import call_local_llm
+from local_llm import call_local_llm, with_model_override
 
 # ============================================================================
 # SCORING PROMPT
@@ -59,9 +61,13 @@ Be strict. Most samples should score 5-7."""
 
 def call_llm_for_scoring(prompt: str) -> str:
     """
-    Delegate scoring queries to the local LLM helper (OPT-6.7b by default).
+    Delegate scoring queries to the local LLM helper (Ollama llama2 by default).
     """
 
+    score_model = os.environ.get("SCORE_LLM_MODEL")
+    if score_model:
+        with with_model_override(score_model):
+            return call_local_llm(prompt, max_new_tokens=600, temperature=0.3, top_p=0.9)
     return call_local_llm(prompt, max_new_tokens=600, temperature=0.3, top_p=0.9)
 
 # ============================================================================
@@ -197,7 +203,7 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
     
     args = parser.parse_args()
     
-    if not args.stats_only and not args.output:
+    if not args.stats_only and not args.output and not Path(args.input).is_dir():
         parser.error("--output required unless --stats-only is used")
     
     # Load data
@@ -205,9 +211,34 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
     print("QUALITY SCORING")
     print("="*70)
     print(f"Loading from: {args.input}")
+
+    input_path = Path(args.input)
+    if str(args.input).lower() == "latest":
+        runs_dir = Path("runs")
+        if not runs_dir.exists():
+            print("Error: runs/ does not exist. Run generate.py first.")
+            return
+        run_dirs = [p for p in runs_dir.iterdir() if p.is_dir() and p.name.startswith("run_")]
+        if not run_dirs:
+            print("Error: No run_* directories found under runs/.")
+            return
+        latest = max(run_dirs, key=lambda p: p.stat().st_mtime)
+        input_path = latest
+        print(f"Using latest run directory: {input_path}")
+
+    if input_path.is_dir():
+        filtered_files = list(input_path.rglob("filtered_*.jsonl"))
+        if not filtered_files:
+            print(f"Error: No filtered_*.jsonl files found in {input_path}")
+            return
+        for filtered_file in filtered_files:
+            output_file = filtered_file.with_name(filtered_file.name.replace("filtered_", "final_"))
+            print(f"\nProcessing: {filtered_file} -> {output_file}")
+            _run_score_single(filtered_file, output_file, args.threshold, args.stats_only, args.sample)
+        return
     
     samples = []
-    with open(args.input, 'r') as f:
+    with open(args.input, "r") as f:
         for line in f:
             samples.append(json.loads(line))
     
@@ -329,3 +360,126 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
 
 if __name__ == "__main__":
     main()
+
+
+def _run_score_single(
+    input_file: Path,
+    output_file: Path,
+    threshold: float,
+    stats_only: bool,
+    sample: Optional[int],
+) -> None:
+    print("=" * 70)
+    print("QUALITY SCORING")
+    print("=" * 70)
+    print(f"Loading from: {input_file}")
+
+    samples = []
+    with open(input_file, "r") as f:
+        for line in f:
+            samples.append(json.loads(line))
+
+    if sample:
+        samples = samples[:sample]
+        print(f"Sampling: {len(samples)} samples (for testing)")
+
+    initial_count = len(samples)
+    print(f"Loaded: {initial_count} samples")
+    print(f"Threshold: {threshold}")
+
+    print(f"\n{'='*70}")
+    print("SCORING SAMPLES")
+    print(f"{'='*70}")
+    print(f"⚠️  This runs the local LLM for each sample and can be slow")
+    print(f"   Estimated calls: {len(samples)}")
+
+    scored_samples = score_batch(samples)
+
+    print(f"\nSuccessfully scored: {len(scored_samples)}/{initial_count}")
+
+    passed = [s for s in scored_samples if s["quality_score"] >= threshold]
+
+    print(f"\n{'='*70}")
+    print("SCORING STATISTICS")
+    print(f"{'='*70}")
+
+    if scored_samples:
+        scores = [s["quality_score"] for s in scored_samples]
+
+        print(f"\nScore distribution:")
+        print(f"  Mean:   {sum(scores)/len(scores):.2f}")
+        print(f"  Median: {sorted(scores)[len(scores)//2]:.2f}")
+        print(f"  Min:    {min(scores):.2f}")
+        print(f"  Max:    {max(scores):.2f}")
+
+        print(f"\nScore histogram:")
+        score_bins = Counter()
+        for score in scores:
+            bin = int(score)
+            score_bins[bin] += 1
+
+        for bin in sorted(score_bins.keys()):
+            count = score_bins[bin]
+            pct = count / len(scores) * 100
+            bar = "█" * int(pct / 2)
+            print(f"  {bin:2d}: {bar} {count:4d} ({pct:5.1f}%)")
+
+        print(f"\n{'─'*70}")
+        print(f"Above threshold ({threshold}): {len(passed)}/{len(scored_samples)} ({len(passed)/len(scored_samples)*100:.1f}%)")
+        print(f"{'─'*70}")
+
+    if scored_samples:
+        print(f"\n{'='*70}")
+        print("COMMON ISSUES")
+        print(f"{'='*70}")
+
+        all_issues = []
+        for s in scored_samples:
+            all_issues.extend(s.get("score_issues", []))
+
+        if all_issues:
+            issue_counts = Counter(all_issues)
+            print(f"\nMost common issues:")
+            for issue, count in issue_counts.most_common(10):
+                print(f"  • {issue}: {count}")
+        else:
+            print("No issues reported")
+
+    print(f"\n{'='*70}")
+    print("EXAMPLES")
+    print(f"{'='*70}")
+
+    if scored_samples:
+        high_score = max(scored_samples, key=lambda s: s["quality_score"])
+        print(f"\nHighest scoring ({high_score['quality_score']:.1f}):")
+        print(f"Q: {high_score['question'][:80]}...")
+        print(f"Reasoning: {high_score['score_reasoning']}")
+
+        low_score = min(scored_samples, key=lambda s: s["quality_score"])
+        print(f"\nLowest scoring ({low_score['quality_score']:.1f}):")
+        print(f"Q: {low_score['question'][:80]}...")
+        print(f"Reasoning: {low_score['score_reasoning']}")
+        if low_score.get("score_issues"):
+            print(f"Issues: {', '.join(low_score['score_issues'])}")
+
+    if not stats_only:
+        print(f"\n{'='*70}")
+        print(f"SAVING RESULTS")
+        print(f"{'='*70}")
+        print(f"Saving {len(passed)} samples to: {output_file}")
+
+        with open(output_file, "w") as f:
+            for sample in passed:
+                f.write(json.dumps(sample) + "\n")
+
+        print(f"✓ Saved {len(passed)} high-quality samples")
+
+    print(f"\n{'='*70}")
+    print("PIPELINE COMPLETE")
+    print(f"{'='*70}")
+    print(f"Started with:        {initial_count:5d} samples")
+    print(f"Successfully scored: {len(scored_samples):5d} samples")
+    print(f"Above threshold:     {len(passed):5d} samples ({len(passed)/initial_count*100:.1f}%)")
+
+    if not stats_only:
+        print(f"\n✨ High-quality dataset ready: {output_file}")

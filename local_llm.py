@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Dict
+from typing import Dict, Iterator
+from contextlib import contextmanager
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 OLLAMA_PREFIX = "ollama://"
 LOCAL_MODEL_ID = os.environ.get("LOCAL_LLM_MODEL", f"{OLLAMA_PREFIX}llama2")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
 
 _TOKENIZER: AutoTokenizer | None = None
 _MODEL: AutoModelForCausalLM | None = None
@@ -45,23 +51,25 @@ def _call_ollama(
     max_new_tokens: int,
     temperature: float,
     top_p: float,
-    repetition_penalty: float,
 ) -> str:
+    """Call Ollama CLI. Note: Ollama CLI does not support --max-tokens, --temperature, --top-p flags.
+    Model parameters should be configured via the model's Modelfile or Ollama HTTP API.
+    """
     model_name = LOCAL_MODEL_ID[len(OLLAMA_PREFIX) :]
     cmd = [
         "ollama",
         "run",
         model_name,
         prompt,
-        "--max-tokens",
-        str(max_new_tokens),
-        "--temperature",
-        str(temperature),
-        "--top-p",
-        str(top_p),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    timeout_seconds = int(os.environ.get("OLLAMA_TIMEOUT", "120"))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"ollama timed out after {timeout_seconds} seconds while processing prompt"
+        )
 
     if result.returncode != 0:
         stderr = result.stderr.strip() or "unknown"
@@ -80,12 +88,27 @@ def call_local_llm(
     """Generate text for the provided prompt using the cached local model."""
 
     if LOCAL_MODEL_ID.startswith(OLLAMA_PREFIX):
-        return _call_ollama(prompt, max_new_tokens, temperature, top_p, repetition_penalty)
+        return _call_ollama(prompt, max_new_tokens, temperature, top_p)
 
     tokenizer, model = _load_model()
 
     inputs = tokenizer(prompt, return_tensors="pt")
     inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
+
+    # Compute safe token IDs, handling None values
+    eos_id = tokenizer.eos_token_id
+    if eos_id is None:
+        eos_id = tokenizer.pad_token_id
+    if eos_id is None:
+        eos_id = tokenizer.sep_token_id
+    if eos_id is None:
+        eos_id = tokenizer.cls_token_id
+    if eos_id is None:
+        eos_id = 0  # Safe default fallback
+    
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = eos_id
 
     with torch.inference_mode():
         outputs = model.generate(
@@ -94,8 +117,8 @@ def call_local_llm(
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=pad_id,
+            eos_token_id=eos_id,
             do_sample=True,
             use_cache=True,
         )
@@ -114,3 +137,19 @@ def local_model_info() -> str:
 
     tokenizer, model = _load_model()
     return f"{LOCAL_MODEL_ID} @ {DEVICE} ({model.num_parameters():,} params)"
+
+
+@contextmanager
+def with_model_override(model_id: str) -> Iterator[None]:
+    """Temporarily override LOCAL_MODEL_ID for scoring with a different model."""
+    global LOCAL_MODEL_ID, _MODEL, _TOKENIZER
+    original = LOCAL_MODEL_ID
+    LOCAL_MODEL_ID = model_id
+    _MODEL = None
+    _TOKENIZER = None
+    try:
+        yield
+    finally:
+        LOCAL_MODEL_ID = original
+        _MODEL = None
+        _TOKENIZER = None

@@ -3,5 +3,5 @@ torch>=2.1.0
 transformers>=4.36.0
 accelerate>=0.25.0
 
-# Optional helpers
-# sentencepiece>=0.1.99  # Uncomment if your model needs SentencePiece tokenization
+# Optional
+# sentencepiece>=0.1.99
