@@ -342,10 +342,15 @@ Examples:
 
     if args.ask_samples:
         raw_samples = input("Enter samples per domain: ").strip()
-        if not raw_samples.isdigit():
+        try:
+            parsed_samples = int(raw_samples)
+        except ValueError:
             print("Error: samples per domain must be a positive integer.")
             return
-        samples_per_domain = int(raw_samples)
+        if parsed_samples <= 0:
+            print("Error: samples per domain must be a positive integer.")
+            return
+        samples_per_domain = parsed_samples
     
     print("="*70)
     print("DATA GENERATION")
@@ -417,12 +422,40 @@ Examples:
         missing = _below_minimum(all_samples)
 
     if target_min:
-        # Continue looping until each domain reaches target_min
+        # Continue looping until each domain reaches target_min (bounded)
         missing = _below_minimum(all_samples)
-        while missing:
+        extra_retries = args.max_retries
+        while missing and extra_retries > 0:
+            before_counts = {d: 0 for d in domains}
+            for s in all_samples:
+                d = s.get("domain")
+                if d in before_counts:
+                    before_counts[d] += 1
+
             missing_domains = [d for d, _ in missing]
             new_samples = _run_generation(missing_domains)
+            if not new_samples:
+                extra_retries -= 1
+                if extra_retries == 0:
+                    print("Error: Unable to generate additional samples to meet minimum.")
+                    break
+                continue
+
             all_samples.extend(new_samples)
+
+            after_counts = before_counts.copy()
+            for s in new_samples:
+                d = s.get("domain")
+                if d in after_counts:
+                    after_counts[d] += 1
+
+            progressed = any(after_counts[d] > before_counts[d] for d in missing_domains)
+            if not progressed:
+                extra_retries -= 1
+                if extra_retries == 0:
+                    print("Error: Generation made no progress toward minimum samples.")
+                    break
+
             missing = _below_minimum(all_samples)
 
     # Save
