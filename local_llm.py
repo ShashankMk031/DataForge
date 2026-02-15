@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import logging
 from typing import Dict, Iterator
 from contextlib import contextmanager
 
@@ -18,6 +19,8 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     DEVICE = "mps"
 else:
     DEVICE = "cpu"
+
+logger = logging.getLogger(__name__)
 
 _TOKENIZER: AutoTokenizer | None = None
 _MODEL: AutoModelForCausalLM | None = None
@@ -42,6 +45,8 @@ def _load_model() -> tuple[AutoTokenizer, AutoModelForCausalLM]:
 
         _MODEL = AutoModelForCausalLM.from_pretrained(LOCAL_MODEL_ID, **model_kwargs)
         _MODEL.eval()
+        if DEVICE == "mps":
+            _MODEL.to(torch.device("mps"))
 
     return _TOKENIZER, _MODEL
 
@@ -104,6 +109,7 @@ def call_local_llm(
     if eos_id is None:
         eos_id = tokenizer.cls_token_id
     if eos_id is None:
+        logger.warning("Using eos_id=0 fallback; tokenizer may be misconfigured.")
         eos_id = 0  # Safe default fallback
     
     pad_id = tokenizer.pad_token_id

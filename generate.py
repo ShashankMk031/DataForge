@@ -248,10 +248,10 @@ Examples:
     
     parser.add_argument(
         "--domain", "-d",
-        default="prompt",
+        default="all",
         help=(
             f"Domain to generate. Options: {', '.join(TASK_SPEC['domains'])} or 'all'. "
-            "Default: prompt for custom domains."
+            "Use --interactive to prompt for custom domains."
         ),
     )
 
@@ -295,7 +295,7 @@ Examples:
     
     # Determine domains (support interactive/custom)
     domain_notes_map: dict[str, str] = {}
-    if args.interactive or args.domain == "prompt":
+    if args.interactive:
         raw = input("Enter domains (comma-separated): ").strip()
         domains = [d.strip() for d in raw.split(",") if d.strip()]
         if not domains:
@@ -305,6 +305,9 @@ Examples:
         for d in domains:
             notes = input(f"  {d}: ").strip()
             domain_notes_map[d] = notes
+    elif args.domain == "prompt":
+        print("Error: Use --interactive to prompt for domains.")
+        return
     elif args.domains:
         domains = [d.strip() for d in args.domains.split(",") if d.strip()]
         if not domains:
@@ -361,9 +364,10 @@ Examples:
     # Compute step_count from TASK_SPEC
     step_count = TASK_SPEC["max_steps"] - TASK_SPEC["min_steps"] + 1
     
-    def _run_generation() -> list[dict]:
+    def _run_generation(selected_domains: Optional[list[str]] = None) -> list[dict]:
+        domain_list = selected_domains if selected_domains is not None else domains
         generated = []
-        for domain in domains:
+        for domain in domain_list:
             batch = generate_batch(
                 domain=domain,
                 samples_per_config=max(1, samples_per_domain // (len(difficulties) * step_count)),
@@ -394,20 +398,20 @@ Examples:
             f"Retrying... ({retries_left} retries left)"
         )
         retries_left -= 1
-        all_samples = _run_generation()
+        missing_domains = [d for d, _ in missing]
+        new_samples = _run_generation(missing_domains)
+        all_samples.extend(new_samples)
         missing = _below_minimum(all_samples)
 
-    # Save domain notes (if any)
-    if any(domain_notes_map.values()):
-        output_path = Path(args.output)
-        config_path = output_path.with_name(f"{output_path.stem}_domain_config.json")
-        with open(config_path, "w") as f:
-            json.dump({"domains": domain_notes_map}, f, indent=2)
-        print(f"\n🧩 Saved domain config: {config_path}")
-    
     # Save
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     if args.output:
+        if any(domain_notes_map.values()):
+            output_path = Path(args.output)
+            config_path = output_path.with_name(f"{output_path.stem}_domain_config.json")
+            with open(config_path, "w") as f:
+                json.dump({"domains": domain_notes_map}, f, indent=2)
+            print(f"\n🧩 Saved domain config: {config_path}")
         print(f"\n💾 Saving to {args.output}...")
         with open(args.output, "w") as f:
             for sample in all_samples:

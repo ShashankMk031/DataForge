@@ -500,7 +500,8 @@ Examples:
     consistency_filter = ConsistencyFilter(config)
     samples = consistency_filter.check_consistency(samples)
     
-    print(f"Passed: {len(samples)}/{before_consistency} ({len(samples)/before_consistency*100:.1f}%)")
+    consistency_percent = (len(samples) / before_consistency * 100) if before_consistency > 0 else 0.0
+    print(f"Passed: {len(samples)}/{before_consistency} ({consistency_percent:.1f}%)")
     
     consistency_stats = consistency_filter.get_stats()
     if consistency_stats["inconsistent_groups"] > 0:
@@ -519,7 +520,8 @@ Examples:
     quality_filter = QualityFilter()
     samples, quality_failures = quality_filter.filter_batch(samples)
     
-    print(f"Passed: {len(samples)}/{before_quality} ({len(samples)/before_quality*100:.1f}%)")
+    quality_percent = (len(samples) / before_quality * 100) if before_quality > 0 else 0.0
+    print(f"Passed: {len(samples)}/{before_quality} ({quality_percent:.1f}%)")
     
     if quality_failures:
         print(f"\nQuality failure reasons:")
@@ -531,7 +533,7 @@ Examples:
     domain_config_path = args.domain_config
     if not domain_config_path:
         input_path = Path(args.input)
-        candidate = input_path.with_name(f"{input_path.stem}_domain_config.json")
+        candidate = input_path.with_name("domain_config.json")
         if candidate.exists():
             domain_config_path = str(candidate)
 
@@ -686,7 +688,8 @@ def _run_filter_single(
     consistency_filter = ConsistencyFilter(config)
     samples = consistency_filter.check_consistency(samples)
 
-    print(f"Passed: {len(samples)}/{before_consistency} ({len(samples)/before_consistency*100:.1f}%)")
+    consistency_percent = (len(samples) / before_consistency * 100) if before_consistency > 0 else 0.0
+    print(f"Passed: {len(samples)}/{before_consistency} ({consistency_percent:.1f}%)")
 
     consistency_stats = consistency_filter.get_stats()
     if consistency_stats["inconsistent_groups"] > 0:
@@ -704,7 +707,8 @@ def _run_filter_single(
     quality_filter = QualityFilter()
     samples, quality_failures = quality_filter.filter_batch(samples)
 
-    print(f"Passed: {len(samples)}/{before_quality} ({len(samples)/before_quality*100:.1f}%)")
+    quality_percent = (len(samples) / before_quality * 100) if before_quality > 0 else 0.0
+    print(f"Passed: {len(samples)}/{before_quality} ({quality_percent:.1f}%)")
 
     if quality_failures:
         print(f"\nQuality failure reasons:")

@@ -203,7 +203,12 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
     
     args = parser.parse_args()
     
-    if not args.stats_only and not args.output and not Path(args.input).is_dir():
+    if (
+        not args.stats_only
+        and not args.output
+        and str(args.input).lower() != "latest"
+        and not Path(args.input).is_dir()
+    ):
         parser.error("--output required unless --stats-only is used")
     
     # Load data
@@ -236,127 +241,11 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
             print(f"\nProcessing: {filtered_file} -> {output_file}")
             _run_score_single(filtered_file, output_file, args.threshold, args.stats_only, args.sample)
         return
-    
-    samples = []
-    with open(args.input, "r") as f:
-        for line in f:
-            samples.append(json.loads(line))
-    
-    if args.sample:
-        samples = samples[:args.sample]
-        print(f"Sampling: {len(samples)} samples (for testing)")
-    
-    initial_count = len(samples)
-    print(f"Loaded: {initial_count} samples")
-    print(f"Threshold: {args.threshold}")
-    
-    # Score
-    print(f"\n{'='*70}")
-    print("SCORING SAMPLES")
-    print(f"{'='*70}")
-    print(f"⚠️  This calls LLM API for each sample - can be expensive!")
-    print(f"   Estimated API calls: {len(samples)}")
-    
-    scored_samples = score_batch(samples)
-    
-    print(f"\nSuccessfully scored: {len(scored_samples)}/{initial_count}")
-    
-    # Filter by threshold
-    passed = [s for s in scored_samples if s["quality_score"] >= args.threshold]
-    
-    # Statistics
-    print(f"\n{'='*70}")
-    print("SCORING STATISTICS")
-    print(f"{'='*70}")
-    
-    if scored_samples:
-        scores = [s["quality_score"] for s in scored_samples]
-        
-        print(f"\nScore distribution:")
-        print(f"  Mean:   {sum(scores)/len(scores):.2f}")
-        print(f"  Median: {sorted(scores)[len(scores)//2]:.2f}")
-        print(f"  Min:    {min(scores):.2f}")
-        print(f"  Max:    {max(scores):.2f}")
-        
-        # Score histogram
-        print(f"\nScore histogram:")
-        score_bins = Counter()
-        for score in scores:
-            bin = int(score)
-            score_bins[bin] += 1
-        
-        for bin in sorted(score_bins.keys()):
-            count = score_bins[bin]
-            pct = count / len(scores) * 100
-            bar = "█" * int(pct / 2)
-            print(f"  {bin:2d}: {bar} {count:4d} ({pct:5.1f}%)")
-        
-        # Above threshold
-        print(f"\n{'─'*70}")
-        print(f"Above threshold ({args.threshold}): {len(passed)}/{len(scored_samples)} ({len(passed)/len(scored_samples)*100:.1f}%)")
-        print(f"{'─'*70}")
-    
-    # Common issues
-    if scored_samples:
-        print(f"\n{'='*70}")
-        print("COMMON ISSUES")
-        print(f"{'='*70}")
-        
-        all_issues = []
-        for s in scored_samples:
-            all_issues.extend(s.get("score_issues", []))
-        
-        if all_issues:
-            issue_counts = Counter(all_issues)
-            print(f"\nMost common issues:")
-            for issue, count in issue_counts.most_common(10):
-                print(f"  • {issue}: {count}")
-        else:
-            print("No issues reported")
-    
-    # Examples
-    print(f"\n{'='*70}")
-    print("EXAMPLES")
-    print(f"{'='*70}")
-    
-    if scored_samples:
-        # High scoring example
-        high_score = max(scored_samples, key=lambda s: s["quality_score"])
-        print(f"\nHighest scoring ({high_score['quality_score']:.1f}):")
-        print(f"Q: {high_score['question'][:80]}...")
-        print(f"Reasoning: {high_score['score_reasoning']}")
-        
-        # Low scoring example
-        low_score = min(scored_samples, key=lambda s: s["quality_score"])
-        print(f"\nLowest scoring ({low_score['quality_score']:.1f}):")
-        print(f"Q: {low_score['question'][:80]}...")
-        print(f"Reasoning: {low_score['score_reasoning']}")
-        if low_score.get("score_issues"):
-            print(f"Issues: {', '.join(low_score['score_issues'])}")
-    
-    # Save
-    if not args.stats_only:
-        print(f"\n{'='*70}")
-        print(f"SAVING RESULTS")
-        print(f"{'='*70}")
-        print(f"Saving {len(passed)} samples to: {args.output}")
-        
-        with open(args.output, 'w') as f:
-            for sample in passed:
-                f.write(json.dumps(sample) + '\n')
-        
-        print(f"✓ Saved {len(passed)} high-quality samples")
-    
-    # Final summary
-    print(f"\n{'='*70}")
-    print("PIPELINE COMPLETE")
-    print(f"{'='*70}")
-    print(f"Started with:        {initial_count:5d} samples")
-    print(f"Successfully scored: {len(scored_samples):5d} samples")
-    print(f"Above threshold:     {len(passed):5d} samples ({len(passed)/initial_count*100:.1f}%)")
-    
-    if not args.stats_only:
-        print(f"\n✨ High-quality dataset ready: {args.output}")
+
+    output_file = Path(args.output) if args.output else None
+    if output_file is None and args.stats_only:
+        output_file = Path("scored.jsonl")
+    _run_score_single(input_path, output_file, args.threshold, args.stats_only, args.sample)
 
 if __name__ == "__main__":
     main()
@@ -364,7 +253,7 @@ if __name__ == "__main__":
 
 def _run_score_single(
     input_file: Path,
-    output_file: Path,
+    output_file: Optional[Path],
     threshold: float,
     stats_only: bool,
     sample: Optional[int],
@@ -463,6 +352,8 @@ def _run_score_single(
             print(f"Issues: {', '.join(low_score['score_issues'])}")
 
     if not stats_only:
+        if output_file is None:
+            raise ValueError("output_file is required unless stats_only is True")
         print(f"\n{'='*70}")
         print(f"SAVING RESULTS")
         print(f"{'='*70}")
@@ -479,7 +370,8 @@ def _run_score_single(
     print(f"{'='*70}")
     print(f"Started with:        {initial_count:5d} samples")
     print(f"Successfully scored: {len(scored_samples):5d} samples")
-    print(f"Above threshold:     {len(passed):5d} samples ({len(passed)/initial_count*100:.1f}%)")
+    final_percent = (len(passed) / initial_count * 100) if initial_count > 0 else 0.0
+    print(f"Above threshold:     {len(passed):5d} samples ({final_percent:.1f}%)")
 
     if not stats_only:
         print(f"\n✨ High-quality dataset ready: {output_file}")
