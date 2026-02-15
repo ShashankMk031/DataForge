@@ -240,6 +240,12 @@ Examples:
         default=200,
         help="Number of samples per domain (default: 200)",
     )
+    
+    parser.add_argument(
+        "--ask-samples",
+        action="store_true",
+        help="Prompt for samples per domain.",
+    )
 
     parser.add_argument(
         "--run-dir",
@@ -333,6 +339,13 @@ Examples:
         samples_per_domain = args.samples // len(domains)
     else:
         samples_per_domain = args.samples_per_domain
+
+    if args.ask_samples:
+        raw_samples = input("Enter samples per domain: ").strip()
+        if not raw_samples.isdigit():
+            print("Error: samples per domain must be a positive integer.")
+            return
+        samples_per_domain = int(raw_samples)
     
     print("="*70)
     print("DATA GENERATION")
@@ -402,6 +415,15 @@ Examples:
         new_samples = _run_generation(missing_domains)
         all_samples.extend(new_samples)
         missing = _below_minimum(all_samples)
+
+    if target_min:
+        # Continue looping until each domain reaches target_min
+        missing = _below_minimum(all_samples)
+        while missing:
+            missing_domains = [d for d, _ in missing]
+            new_samples = _run_generation(missing_domains)
+            all_samples.extend(new_samples)
+            missing = _below_minimum(all_samples)
 
     # Save
     timestamp = time.strftime("%Y%m%d_%H%M%S")
