@@ -408,24 +408,10 @@ Examples:
                 counts[d] += 1
         return [(d, c) for d, c in counts.items() if c < target_min]
 
-    missing = _below_minimum(all_samples)
-    while target_min and missing and retries_left > 0:
-        missing_str = ", ".join(f"{d}={c}" for d, c in missing)
-        print(
-            f"\n⚠️  Samples below minimum per domain ({target_min}): {missing_str}. "
-            f"Retrying... ({retries_left} retries left)"
-        )
-        retries_left -= 1
-        missing_domains = [d for d, _ in missing]
-        new_samples = _run_generation(missing_domains)
-        all_samples.extend(new_samples)
-        missing = _below_minimum(all_samples)
-
     if target_min:
         # Continue looping until each domain reaches target_min (bounded)
         missing = _below_minimum(all_samples)
-        extra_retries = args.max_retries
-        while missing and extra_retries > 0:
+        while missing and retries_left > 0:
             before_counts = {d: 0 for d in domains}
             for s in all_samples:
                 d = s.get("domain")
@@ -435,8 +421,8 @@ Examples:
             missing_domains = [d for d, _ in missing]
             new_samples = _run_generation(missing_domains)
             if not new_samples:
-                extra_retries -= 1
-                if extra_retries == 0:
+                retries_left -= 1
+                if retries_left == 0:
                     print("Error: Unable to generate additional samples to meet minimum.")
                     break
                 continue
@@ -451,8 +437,8 @@ Examples:
 
             progressed = any(after_counts[d] > before_counts[d] for d in missing_domains)
             if not progressed:
-                extra_retries -= 1
-                if extra_retries == 0:
+                retries_left -= 1
+                if retries_left == 0:
                     print("Error: Generation made no progress toward minimum samples.")
                     break
 
