@@ -412,6 +412,7 @@ Examples:
         # Continue looping until each domain reaches target_min (bounded)
         missing = _below_minimum(all_samples)
         while missing and retries_left > 0:
+            retries_left -= 1
             before_counts = {d: 0 for d in domains}
             for s in all_samples:
                 d = s.get("domain")
@@ -421,7 +422,6 @@ Examples:
             missing_domains = [d for d, _ in missing]
             new_samples = _run_generation(missing_domains)
             if not new_samples:
-                retries_left -= 1
                 if retries_left == 0:
                     print("Error: Unable to generate additional samples to meet minimum.")
                     break
@@ -437,7 +437,6 @@ Examples:
 
             progressed = any(after_counts[d] > before_counts[d] for d in missing_domains)
             if not progressed:
-                retries_left -= 1
                 if retries_left == 0:
                     print("Error: Generation made no progress toward minimum samples.")
                     break
