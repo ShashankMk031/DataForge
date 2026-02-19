@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Optional
 from collections import Counter
+import random
 
 from local_llm import call_local_llm, with_model_override
 
@@ -201,6 +202,18 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
         help="Only score first N samples (for testing)"
     )
 
+    parser.add_argument(
+        "--human-audit",
+        type=int,
+        default=0,
+        help="Export N samples for human audit (default: 0)",
+    )
+
+    parser.add_argument(
+        "--audit-out",
+        help="Output JSONL path for human audit samples (default: <output>_audit.jsonl)",
+    )
+
     
     args = parser.parse_args()
     
@@ -246,7 +259,15 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
     output_file = Path(args.output) if args.output else None
     if output_file is None and args.stats_only:
         output_file = Path("scored.jsonl")
-    _run_score_single(input_path, output_file, args.threshold, args.stats_only, args.sample)
+    _run_score_single(
+        input_path,
+        output_file,
+        args.threshold,
+        args.stats_only,
+        args.sample,
+        args.human_audit,
+        args.audit_out,
+    )
 
 def _run_score_single(
     input_file: Path,
@@ -254,6 +275,8 @@ def _run_score_single(
     threshold: float,
     stats_only: bool,
     sample: Optional[int],
+    human_audit: int,
+    audit_out: Optional[str],
 ) -> None:
     print("=" * 70)
     print("QUALITY SCORING")
@@ -372,6 +395,23 @@ def _run_score_single(
 
     if not stats_only:
         print(f"\n✨ High-quality dataset ready: {output_file}")
+
+    if human_audit > 0:
+        audit_pool = scored_samples if scored_samples else []
+        if audit_pool:
+            audit_count = min(human_audit, len(audit_pool))
+            audit_samples = random.sample(audit_pool, audit_count)
+            if output_file:
+                default_audit = output_file.with_name(output_file.stem + "_audit.jsonl")
+            else:
+                default_audit = Path("audit_samples.jsonl")
+            audit_path = Path(audit_out) if audit_out else default_audit
+            with open(audit_path, "w") as f:
+                for s in audit_samples:
+                    f.write(json.dumps(s) + "\n")
+            print(f"\nHuman audit samples saved to: {audit_path}")
+        else:
+            print("\nHuman audit skipped: no scored samples available.")
 
 
 if __name__ == "__main__":
