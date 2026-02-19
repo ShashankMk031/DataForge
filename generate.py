@@ -130,7 +130,7 @@ def parse_llm_response(response: str) -> Optional[dict]:
         if not all(field in parsed for field in required_fields):
             return None
 
-        if not isinstance(parsed["reasoning"], list):
+        if not isinstance(parsed["reasoning"], list) or len(parsed["reasoning"]) < TASK_SPEC["min_steps"]:
             return None
 
         if not isinstance(parsed["answer"], str):
