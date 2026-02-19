@@ -200,6 +200,7 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
         type=int,
         help="Only score first N samples (for testing)"
     )
+
     
     args = parser.parse_args()
     
@@ -246,10 +247,6 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
     if output_file is None and args.stats_only:
         output_file = Path("scored.jsonl")
     _run_score_single(input_path, output_file, args.threshold, args.stats_only, args.sample)
-
-if __name__ == "__main__":
-    main()
-
 
 def _run_score_single(
     input_file: Path,
@@ -375,3 +372,7 @@ def _run_score_single(
 
     if not stats_only:
         print(f"\n✨ High-quality dataset ready: {output_file}")
+
+
+if __name__ == "__main__":
+    main()

@@ -34,6 +34,14 @@ TASK_SPEC = {
 }
 
 # Multiple prompt variants for diversity
+STRICT_JSON_RULES = """
+Output must be STRICT JSON only (no markdown, no prose outside JSON).
+Constraints:
+- "reasoning" must be an array of strings.
+- Each reasoning step MUST include a numeric equation with "=" (e.g., "Step 1: 3 * 4 = 12").
+- "answer" must be a string containing a numeric value and units (e.g., "12 employees").
+"""
+
 PROMPT_TEMPLATES = {
     "detailed": """Generate a {difficulty} algebra word problem about {domain}.
 
@@ -42,6 +50,7 @@ Requirements:
 - Clear step-by-step reasoning
 - Numerical answer with units
 {domain_notes}
+{strict_rules}
 
 Output as JSON:
 {{
@@ -59,6 +68,7 @@ Task: {difficulty} difficulty, {domain}, {num_steps} solution steps
 
 Write it like you're teaching a student. Show your work clearly.
 {domain_notes}
+{strict_rules}
 
 JSON format:
 {{
@@ -74,6 +84,7 @@ JSON format:
 Difficulty: {difficulty}  
 Steps: {num_steps}
 {domain_notes}
+{strict_rules}
 
 Create problem with solution.
 
@@ -116,10 +127,19 @@ def parse_llm_response(response: str) -> Optional[dict]:
         
         # Validate structure
         required_fields = ["question", "reasoning", "answer", "difficulty", "domain", "num_steps"]
-        if all(field in parsed for field in required_fields):
-            return parsed
-        
-        return None
+        if not all(field in parsed for field in required_fields):
+            return None
+
+        if not isinstance(parsed["reasoning"], list):
+            return None
+
+        if not isinstance(parsed["answer"], str):
+            return None
+
+        if not all(isinstance(step, str) and "=" in step for step in parsed["reasoning"]):
+            return None
+
+        return parsed
     except:
         return None
 
@@ -139,6 +159,7 @@ def generate_sample(
         difficulty=difficulty,
         num_steps=num_steps,
         domain_notes=domain_notes,
+        strict_rules=STRICT_JSON_RULES.strip(),
     )
     
     # Try up to 3 times
