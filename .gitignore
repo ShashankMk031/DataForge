@@ -51,3 +51,8 @@ credentials.json
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Personal notes
+interview.md
+
+runs/
