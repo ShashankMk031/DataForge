@@ -216,6 +216,8 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
 
     
     args = parser.parse_args()
+    if args.human_audit < 0:
+        parser.error("--human-audit must be non-negative")
     
     if (
         not args.stats_only
