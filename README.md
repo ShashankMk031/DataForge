@@ -99,7 +99,7 @@ export OLLAMA_TIMEOUT=120
 **Where it’s useful**: tutoring data, eval sets, fine‑tuning seed data, domain‑specific math datasets.  
 **Setbacks**: local LLM quality, strict JSON fragility, and low retention for non‑math domains.  
 **What fails**: domains that can’t be expressed as equation‑based steps, or models that produce invalid JSON consistently.  
-**Why llama**: local, private, easy to run on macOS with Ollama.  
+**Why Llama (Llama 2)**: local, private, easy to run on macOS with Ollama.  
 **API keys?**: supported by swapping the LLM adapter; higher quality at higher cost and lower privacy.  
 **Trust**: synthetic data must be validated; use filters + scoring + optional human audit before training.
 
