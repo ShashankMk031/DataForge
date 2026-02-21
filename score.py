@@ -60,12 +60,15 @@ Be strict. Most samples should score 5-7."""
 # LLM INTEGRATION
 # ============================================================================
 
-def call_llm_for_scoring(prompt: str) -> str:
+ALT_JUDGE_MODEL = "ollama://mistral"
+
+
+def call_llm_for_scoring(prompt: str, judge_model: Optional[str] = None) -> str:
     """
     Delegate scoring queries to the local LLM helper (Ollama llama2 by default).
     """
 
-    score_model = os.environ.get("SCORE_LLM_MODEL")
+    score_model = judge_model or os.environ.get("SCORE_LLM_MODEL")
     if score_model:
         with with_model_override(score_model):
             return call_local_llm(prompt, max_new_tokens=600, temperature=0.3, top_p=0.9)
@@ -95,7 +98,7 @@ def parse_score_response(response: str) -> Optional[dict]:
     except:
         return None
 
-def score_sample(sample: dict) -> Optional[dict]:
+def score_sample(sample: dict, judge_model: Optional[str] = None) -> Optional[dict]:
     """Score a single sample using LLM."""
     
     # Format prompt
@@ -108,7 +111,7 @@ def score_sample(sample: dict) -> Optional[dict]:
     # Try up to 2 times
     for attempt in range(2):
         try:
-            response = call_llm_for_scoring(prompt)
+            response = call_llm_for_scoring(prompt, judge_model=judge_model)
             score_data = parse_score_response(response)
             
             if score_data:
@@ -127,7 +130,11 @@ def score_sample(sample: dict) -> Optional[dict]:
     
     return None
 
-def score_batch(samples: list[dict], show_progress: bool = True) -> list[dict]:
+def score_batch(
+    samples: list[dict],
+    show_progress: bool = True,
+    judge_model: Optional[str] = None,
+) -> list[dict]:
     """Score a batch of samples."""
     scored = []
     failed = 0
@@ -136,7 +143,7 @@ def score_batch(samples: list[dict], show_progress: bool = True) -> list[dict]:
         if show_progress and (i + 1) % 10 == 0:
             print(f"  Scored {i+1}/{len(samples)}...")
         
-        scored_sample = score_sample(sample)
+        scored_sample = score_sample(sample, judge_model=judge_model)
         
         if scored_sample:
             scored.append(scored_sample)
@@ -214,6 +221,14 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
         help="Output JSONL path for human audit samples (default: <output>_audit.jsonl)",
     )
 
+    parser.add_argument(
+        "--judge-model",
+        help=(
+            "Optional judge model override. Example: "
+            f"{ALT_JUDGE_MODEL} (not required on this machine)"
+        ),
+    )
+
     
     args = parser.parse_args()
     if args.human_audit < 0:
@@ -255,7 +270,16 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
         for filtered_file in filtered_files:
             output_file = filtered_file.with_name(filtered_file.name.replace("filtered_", "final_"))
             print(f"\nProcessing: {filtered_file} -> {output_file}")
-            _run_score_single(filtered_file, output_file, args.threshold, args.stats_only, args.sample)
+            _run_score_single(
+                filtered_file,
+                output_file,
+                args.threshold,
+                args.stats_only,
+                args.sample,
+                args.human_audit,
+                args.audit_out,
+                args.judge_model,
+            )
         return
 
     output_file = Path(args.output) if args.output else None
@@ -269,6 +293,7 @@ Note: This script runs the local LLM for each sample; inference can be slow on C
         args.sample,
         args.human_audit,
         args.audit_out,
+        args.judge_model,
     )
 
 def _run_score_single(
@@ -279,6 +304,7 @@ def _run_score_single(
     sample: Optional[int],
     human_audit: int,
     audit_out: Optional[str],
+    judge_model: Optional[str],
 ) -> None:
     print("=" * 70)
     print("QUALITY SCORING")
@@ -304,7 +330,7 @@ def _run_score_single(
     print(f"⚠️  This runs the local LLM for each sample and can be slow")
     print(f"   Estimated calls: {len(samples)}")
 
-    scored_samples = score_batch(samples)
+    scored_samples = score_batch(samples, judge_model=judge_model)
 
     print(f"\nSuccessfully scored: {len(scored_samples)}/{initial_count}")
 
